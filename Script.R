@@ -50,6 +50,15 @@ val_labels <- classes[val_indices,]
 test_data <- genes[test_indices,]
 test_labels <- classes[test_indices,]
 
+#'Scale the training, validation and test data, using the mean and std of training data.
+# mean <- apply(train_data, 2, mean)
+# std <- apply(train_data, 2, sd)
+# train_data <- scale(train_data, center = mean, scale = std)
+#'Each feature in training data will have a mean of 0 and standard deviation of 1.
+# val_data <- scale(val_data, center = mean, scale = std)
+# test_data <- scale(test_data, center = mean, scale = std)
+#'NOTE: Scaling not performed due to unchanging accuracy/loss of model, even with tuning.
+
 # Define function to build/compile initial network with 3 hidden layers.
 # Variables to change include number of units, optimizer, batch size and epoch number.
 train_model <- function(units, optimizer_type, batches, epoch_number) {
@@ -64,38 +73,108 @@ train_model <- function(units, optimizer_type, batches, epoch_number) {
     # 5 possible classes, so 5 units in output layer.
     # Softmax activation function used due to classification task. 
     layer_dense(units = 5, activation = "softmax")
+  
+  # Compile model.
   model %>% compile(
     optimizer = optimizer_type,
     loss = "categorical_crossentropy",
     metrics = "accuracy"
   )
+  
+  # Train model.
   history <- model %>% fit(
     train_data,
     train_labels,
     batch_size = batches,
-    epochs = epoch_number
+    epochs = epoch_number,
+    validation_data = list(val_data,val_labels)
   )
-  plot(history)
+  
+  # Plot training and validation loss.
+  plot(history$metrics$loss, type = "l", col = "black", xlab = "Epochs", ylab = "Loss", ylim = c(0, 1))
+  lines(history$metrics$val_loss, type = "l", col = "red")
+  legend("topright", legend = c("Training Loss", "Validation Loss"), lwd = 1,
+         col = c("black", "red"), cex = 0.5)
+  # Plot training and validation accuracy.
+  plot(history$metrics$accuracy, type = "l", col = "black", xlab = "Epochs", ylab = "Accuracy")
+  lines(history$metrics$val_accuracy, type = "l", col = "red")
+  legend("bottomright", legend = c("Training Accuracy", "Validation Accuracy"), lwd = 1,
+         col = c("black", "red"), cex = 0.5)
+  
+  # Print last epoch accuracy and loss values.
   cat("Hyperparameters: ", units, optimizer_type, batches, epoch_number, "\n")
-  cat("Loss: ", tail(history$metrics$loss,1), "\n")
-  cat("Accuracy: ", tail(history$metrics$accuracy,1))
+  cat("Training Loss: ", tail(history$metrics$loss,1), "\n")
+  cat("Training Accuracy: ", tail(history$metrics$accuracy,1), "\n")
+  cat("Validation Loss: ", tail(history$metrics$val_loss,1), "\n")
+  cat("Validation Accuracy: ", tail(history$metrics$val_accuracy,1), "\n")
+  # 
+  # Print maximum validation accuracy and minimum loss values encountered.
+  cat("Max Validation Accuracy: ", max(history$metrics$val_accuracy), "\n")
+  cat("Min Validation Loss: ", min(history$metrics$val_loss), "\n")
+  
+  return(model)
 }
 
-#'Starting parameters are 128 units, 'rmsprop' optimizer, batch size of 2048 and epochs
-#' of 50. Let's start by tuning the number of units in the 3 hidden layers. 
-train_model(1024,"rmsprop",2048,50)
+#'Starting parameters are 128 units, 'rmsprop' optimizer, batch size of 256 and epochs
+#' of 50. Let's start by tuning the number of units in the 3 hidden layers by assessing
+#' validation loss and accuracy.
+train_model(1024,"rmsprop",256,50)
 #'Started with 1024 units, between number of input features and output classes, and 
 #' considering that data appears not too sparse.
-train_model(2048,"rmsprop",2048,50)
-# Increased to 2048. Arrived at the same accuracy but had lower loss. Try lower units.
-train_model(512,"rmsprop",2048,50)
-# Decreased to 512. Arrived at the same accuracy but had higher loss. Try even higher units.
-train_model(4096,"rmsprop",2048,50)
-# Again, same accuracy, but lower loss. Let's try even higher units!
-train_model(8192,"rmsprop",2048,50)
-#'Again, same accuracy, but lower loss, though with this 2X increase the loss decrease is 
-#' less. Let's select previous unit number of 4096 since loss was only marginally worse 
-#' but training was faster.
+train_model(2048,"rmsprop",256,50)
+# Increased to 2048. Arrived at the same accuracy but had higher loss. Try lower units.
+train_model(512,"rmsprop",256,50)
+# Decreased to 512. Arrived at the same accuracy but had lower loss. Try even less units.
+train_model(256,"rmsprop",256,50)
+# Decreased to 256. Arrived at same accuracy but higher loss. Proceed with 512 units.
 
-# Now let's tune for the optimizer, considering 2 other optimizers.
-train_model(4096,"...",2048,50)
+# Now let's tune for the optimizer, considering 2 other optimizers (3 total).
+train_model(256,"sgd",256,50)
+# Same accuracy, but lower loss. Better, but need to consider the last optimizer.
+train_model(256,"adam",256,50)
+# Works great! Much higher accuracy and much lower loss. Proceed with "adam" optimizer.
+
+# Now let's tune the batch size.
+train_model(256,"adam",512,50)
+# Lower accuracy (did not reach 1) and higher loss within 50 epochs. Try smaller batches.
+train_model(256,"adam",128,50)
+#'Reached maximum accuracy of 1 and lower minimum loss faster than larger batch size. Try
+#' even smaller batch size.
+train_model(256, "adam", 64,50)
+train_model(256, "adam", 32,50)
+#'With smaller batch sizes, the model reaches maximum validation accuracy quicker. This
+#' reduces the number of epochs needed and is favourable, but if batch size is too small, 
+#' this can lead to more instability with weight updates (each batch sees fewer samples).
+# Let's proceed with 64 as batch size since 32 might be too small.
+
+#'It looks like with pre-specified hyperparameters, the validation loss begins to 
+#' increase around 13 epochs while the validation accuracy appears to reach its maximum 
+#' at around 13 epochs as well. Let's tune to 13 epochs.
+train_model(256, "adam", 64,13)
+#'However, we can't guarantee that this number of epochs will be optimal in other data
+#' sets, so let's increase the epochs to give us some wiggle room. Let's add only 5 epochs
+#' since we do not want to overfit to the training data.
+train_model(256, "adam", 64,18)
+# We have our tuned model!
+
+# Merge training and validation data into a new training data set.
+train_indices <- append(train_indices,val_indices)
+train_data <- genes[train_indices,]
+train_labels <- classes[train_indices,]
+# Train model on "full" training set. Ignore validation loss/accuracy values from function.
+model <- train_model(256, "adam", 64,18)
+
+# Evaluate model on test set.
+results <- model %>% evaluate(test_data, test_labels)
+results
+
+# Create vector of predicted probabilities for each class for the test data.
+preds <- predict(model, test_data)
+# Create vector with classes with highest probability for each test patient.
+preds.cl <- max.col(preds)
+# Recall that the classes BRCA COAD KIRC LUAD PRAD correspond to labels 0, 1, 2, 3, 4.
+# Create confusion matrix of actual vs predicted labels.
+table(max.col(test_labels),preds.cl)
+#'The model successfully classified all test data to match test labels. No patterns of
+#' misclassification.
+
